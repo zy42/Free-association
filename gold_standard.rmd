@@ -1,0 +1,286 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+
+ws353_rel <- read.table("wordsim_relatedness_goldstandard.txt")
+ws353_sim <- read.table("wordsim_similarity_goldstandard.txt")
+elp <- read.csv("elp_new.csv")
+#ws353_subs <- read.table("sim353_subs2vec.txt", header = TRUE)
+#colnames(ws353_subs)[3] <- "subs353"
+#ws999_subs <- read.table("sim999_subs2vec.txt",header = TRUE)
+#colnames(ws999_subs)[3] <- "subs999"
+for (col in colnames(elp)[2:8]){
+  if (col == "Semantic_Neighbors"){
+    elp[,col] <- as.numeric(gsub(",","",elp[,col]))
+  }
+  else{
+    elp[,col] <- as.numeric(elp[,col])
+  }
+}
+
+
+
+colnames(ws353_rel) <- c("word1","word2","sim353")
+colnames(ws353_sim) <- colnames(ws353_rel)
+
+ws999 <- read.table("SimLex-999.txt",header = TRUE)
+
+
+
+library(tidyverse)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(Hmisc)
+load("baroni.rda")
+load("tasa.rda")
+load("EN_100k.rda") #bnc HAL
+load("EN_100k_lsa.rda")
+load("EN_100k_cbow.rda")
+library(LSAfun)
+
+sw_final <- read_csv("final_sw.csv")
+
+R123.dat <- read_csv("2018_strengthR123.csv")
+
+ws353_rel$sim <- FALSE
+ws353_sim$sim <- TRUE
+
+ws353_rel$word1 <- tolower(ws353_rel$word1)
+ws353_rel$word2 <- tolower(ws353_rel$word2)
+
+ws353_sim$word1 <- tolower(ws353_sim$word1)
+ws353_sim$word2 <- tolower(ws353_sim$word2)
+
+ws999$word1 <- tolower(ws999$word1)
+ws999$word2 <- tolower(ws999$word2)
+
+ws353 <- rbind(ws353_rel,ws353_sim)
+
+```
+
+
+
+
+
+```{r}
+##build word pairs existing in all benchmark data
+
+
+##sw353 combined
+
+
+get_sw353 <- function(call){
+  sw_ws353 <- data.frame(matrix(nrow = 0,ncol = 9))
+  colnames(sw_ws353) <- c("word1", "word2","R123_sw","sim353","Cos_sw_HALbnc","Cos_sw_LSAbnc","Cos_sw_CBOWbnc","Cos_sw_CBOWbar","Cos_sw_LSAtasa")
+  if (call == "sim353"){
+    word_pairs = ws353
+  }
+  else if (call == "sim353_sim"){
+    word_pairs = ws353_sim
+  }
+  else if (call == "sim353_rel"){
+    word_pairs = ws353_rel
+  }
+for (i in 1:nrow(word_pairs)){
+  w1 <- word_pairs$word1[i]
+  w2 <- word_pairs$word2[i]
+  row = filter(R123.dat, R123.dat$cue == w1 & R123.dat$response == w2)[,c("cue", "response","R123.Strength")]
+  if (nrow(row) == 1){
+    colnames(row) <- c("word1","word2","R123_sw")
+    temp <- row
+    temp$sim353 <- word_pairs[i,"sim353"]
+    temp$Cos_sw_HALbnc <- Cosine(w1,w2,EN_100k)
+    temp$Cos_sw_LSAbnc <- Cosine(w1,w2,EN_100k_lsa)
+    temp$Cos_sw_CBOWbnc <- Cosine(w1,w2,EN_100k_cbow)
+    temp$Cos_sw_CBOWbar <- Cosine(w1,w2,baroni)
+    temp$Cos_sw_LSAtasa <- Cosine(w1,w2,TASA)
+    sw_ws353 <- plyr::rbind.fill(sw_ws353,temp)
+  }
+}
+
+#add lexical characteristics
+sw_ws353$word1_Length <- NA
+sw_ws353$word2_Length <- NA
+sw_ws353$word1_subwf <- NA
+sw_ws353$word2_subwf <- NA
+sw_ws353$word1_semND<- NA
+sw_ws353$word2_semND <- NA
+sw_ws353$word1_semN<- NA
+sw_ws353$word2_semN <- NA
+for (i in 1:nrow(sw_ws353)){
+  w1 = sw_ws353$word1[i]
+  w2 = sw_ws353$word2[i]
+  sw_ws353$word1_Length[i] = nchar(w1)
+  sw_ws353$word2_Length[i] = nchar(w2)
+  sw_ws353$word1_subwf[i] = ifelse(nrow(filter(elp,elp$Word == w1)) ==1, filter(elp,elp$Word == w1)$SUBTLWF,NA)
+  sw_ws353$word2_subwf[i] = ifelse(nrow(filter(elp,elp$Word == w2)) ==1, filter(elp,elp$Word == w2)$SUBTLWF,NA)
+  sw_ws353$word1_semND[i] = ifelse(nrow(filter(elp,elp$Word == w1)) ==1, filter(elp,elp$Word == w1)$Semantic_Neighborhood_Density,NA)
+  sw_ws353$word2_semND[i] = ifelse(nrow(filter(elp,elp$Word == w2)) ==1, filter(elp,elp$Word == w2)$Semantic_Neighborhood_Density,NA)
+  sw_ws353$word1_semN[i] = ifelse(nrow(filter(elp,elp$Word == w1)) ==1, filter(elp,elp$Word == w1)$Semantic_Neighbors,NA)
+  sw_ws353$word2_semN[i] = ifelse(nrow(filter(elp,elp$Word == w2)) ==1, filter(elp,elp$Word == w2)$Semantic_Neighbors,NA)
+}
+return(sw_ws353)
+}
+
+
+sw_ws353.sim <- get_sw353("sim353_sim")
+sw_ws353.rel <- get_sw353("sim353_rel")
+
+#write.csv(sw_ws353.sim, "sim353_sim.csv")
+#write.csv(sw_ws353.sim, "sim353_rel.csv")
+
+get_R2 <- function(call){
+    sw_ws353 <- get_sw353(call)
+R2.dat <- data.frame(Model = c("Baseline","bnc.HAL","bnc.LSA","bnc.CBOW","tasa.LSA","bar.CBOW","R123_sw"),R2 = rep(NA,7))
+
+baseline.model <- lm(sim353~., data = sw_ws353[,c(4,10:15)])
+
+bnc.HAL.model <- lm(sim353~., data = sw_ws353[,c(4,5,10:15)])
+bnc.LSA.model <- lm(sim353~., data = sw_ws353[,c(4,6,10:15)])
+bnc.CBOW.model <- lm(sim353~., data = sw_ws353[,c(4,7,10:15)])
+bar.CBOW.model <- lm(sim353~., data = sw_ws353[,c(4,8,10:15)])
+tasa.LSA.model <- lm(sim353~., data = sw_ws353[,c(4,9,10:15)])
+
+R123.model <- lm(sim353~., data = sw_ws353[,c(3,4,10:15)])
+R2.dat[1,2] <- summary(baseline.model)$r.squared
+R2.dat[2,2] <- summary(bnc.HAL.model)$r.squared
+R2.dat[3,2] <- summary(bnc.LSA.model)$r.squared
+R2.dat[4,2] <- summary(bnc.CBOW.model)$r.squared
+R2.dat[5,2] <- summary(tasa.LSA.model)$r.squared
+R2.dat[6,2] <- summary(bar.CBOW.model)$r.squared
+R2.dat[7,2] <- summary(R123.model)$r.squared
+R2.dat$Model <- factor(R2.dat$Model, levels =level_order <- R2.dat[,1])
+
+return(R2.dat)
+
+}
+
+
+R2_sw353 <- get_sw353("sim353") #both rel and sim
+R2_sw353_sim <- get_sw353("sim353_sim")
+R2_sw353_sim$Type <- "Similar"
+R2_sw353_rel <- get_sw353("sim353_rel")
+R2_sw353_rel$Type <- "Related"
+R2_sw353_split <- rbind(R2_sw353_sim,R2_sw353_rel) #sw353 with rel and sim distinguished
+
+R2_sw353_split <- R2_sw353_split %>% group_by(Type)%>% mutate(additional_R2 = R2 - R2_sw353_split[R2_sw353_split$Model == "Baseline" &R2_sw353_split$Type == Type,]$R2) #gets additional R2 (subtract R2 explained by baseline model)
+
+R2_sw353_split$Model <- factor(R2_sw353_split$Model)
+ggplot(R2_sw353_split, aes(x = Model, y = R2, color = Type))+
+  geom_point(shape  = 15)+ 
+  labs(subtitle ="Baseline: word length,subtitle frequency and semantic neighborhood density for both words", title = "WordSim353")+
+  scale_y_continuous(breaks = pretty(R2_sw353_split$R2,n=10))+
+  theme_bw() ##Total R2 explained
+
+ggplot(R2_sw353_split, aes(x = Model, y = additional_R2))+
+  geom_point(shape  = 15)+ 
+  labs(subtitle ="Baseline: word length,subtitle frequency and semantic neighborhood density for both words", title = "WordSim353")+
+  geom_line()+
+  scale_x_discrete(guide = guide_axis(n.dodge=3))+
+  #scale_y_continuous(breaks = pretty(R2_sw353_split$R2,n=10))+
+  theme_bw()+
+  facet_wrap(~Type) ####Additional R2 explained
+
+```
+
+
+R2 for simLex999 data
+
+```{r}
+
+
+
+sw_ws999 <- data.frame(matrix(nrow = 0,ncol = 9))
+colnames(sw_ws999) <- c("word1", "word2","R123_sw","SimLex999","Cos_sw_HALbnc","Cos_sw_LSAbnc","Cos_sw_CBOWbnc","Cos_sw_CBOWbar","Cos_sw_LSAtasa")
+
+for (i in 1:nrow(ws999)){
+  w1 <- ws999$word1[i]
+  w2 <- ws999$word2[i]
+  row = filter(R123.dat, R123.dat$cue == w1 & R123.dat$response == w2)[,c("cue", "response","R123.Strength")]
+  if (nrow(row) == 1){
+    colnames(row) <- c("word1","word2","R123_sw")
+    temp <- row
+    temp$SimLex999 <- ws999[i, "SimLex999"]
+    temp$Cos_sw_HALbnc <- Cosine(w1,w2,EN_100k)
+    temp$Cos_sw_LSAbnc <- Cosine(w1,w2,EN_100k_lsa)
+    temp$Cos_sw_CBOWbnc <- Cosine(w1,w2,EN_100k_cbow)
+    temp$Cos_sw_CBOWbar <- Cosine(w1,w2,baroni)
+    temp$Cos_sw_LSAtasa <- Cosine(w1,w2,TASA)
+    sw_ws999 <- plyr::rbind.fill(sw_ws999,temp)
+    
+    }
+}
+
+sw_ws999$word1_Length <- NA
+sw_ws999$word2_Length <- NA
+sw_ws999$word1_subwf <- NA
+sw_ws999$word2_subwf <- NA
+sw_ws999$word1_semND<- NA
+sw_ws999$word2_semND <- NA
+sw_ws999$word1_semN<- NA
+sw_ws999$word2_semN <- NA
+for (i in 1:nrow(sw_ws999)){
+  w1 = sw_ws999$word1[i]
+  w2 = sw_ws999$word2[i]
+  sw_ws999$word1_Length[i] = nchar(w1)
+  sw_ws999$word2_Length[i] = nchar(w2)
+  sw_ws999$word1_subwf[i] = ifelse(nrow(filter(elp,elp$Word == w1)) ==1, filter(elp,elp$Word == w1)$SUBTLWF,NA)
+  sw_ws999$word2_subwf[i] = ifelse(nrow(filter(elp,elp$Word == w2)) ==1, filter(elp,elp$Word == w2)$SUBTLWF,NA)
+  sw_ws999$word1_semND[i] = ifelse(nrow(filter(elp,elp$Word == w1)) ==1, filter(elp,elp$Word == w1)$Semantic_Neighborhood_Density,NA)
+  sw_ws999$word2_semND[i] = ifelse(nrow(filter(elp,elp$Word == w2)) ==1, filter(elp,elp$Word == w2)$Semantic_Neighborhood_Density,NA)
+  sw_ws999$word1_semN[i] = ifelse(nrow(filter(elp,elp$Word == w1)) ==1, filter(elp,elp$Word == w1)$Semantic_Neighbors,NA)
+  sw_ws999$word2_semN[i] = ifelse(nrow(filter(elp,elp$Word == w2)) ==1, filter(elp,elp$Word == w2)$Semantic_Neighbors,NA)
+}
+
+
+
+R2.dat <- data.frame(Model = c("Baseline","bnc.HAL","bnc.LSA","bnc.CBOW","tasa.LSA","bar.CBOW","R123_sw"),R2 = rep(NA,7))
+
+baseline.model <- lm(SimLex999~., data = sw_ws999[,c(4,10:15)])
+bnc.HAL.model <- lm(SimLex999~., data = sw_ws999[,c(4,5,10:15)])
+bnc.LSA.model <- lm(SimLex999~., data = sw_ws999[,c(4,6,10:15)])
+bnc.CBOW.model <- lm(SimLex999~., data = sw_ws999[,c(4,7,10:15)])
+bar.CBOW.model <- lm(SimLex999~., data = sw_ws999[,c(4,8,10:15)])
+tasa.LSA.model <- lm(SimLex999~., data = sw_ws999[,c(4,9,10:15)])
+R123.model <- lm(SimLex999~., data = sw_ws999[,c(3,4,10:15)])
+ 
+
+R2.dat[1,2] <- summary(baseline.model)$r.squared
+R2.dat[2,2] <- summary(bnc.HAL.model)$r.squared
+R2.dat[3,2] <- summary(bnc.LSA.model)$r.squared
+R2.dat[4,2] <- summary(bnc.CBOW.model)$r.squared
+R2.dat[5,2] <- summary(tasa.LSA.model)$r.squared
+R2.dat[6,2] <- summary(bar.CBOW.model)$r.squared
+R2.dat[7,2] <- summary(R123.model)$r.squared
+R2.dat$Model <- factor(R2.dat$Model, levels =level_order <- R2.dat[,1])
+
+
+
+
+
+
+ggplot(R2.dat, aes(x = Model, y = R2))+
+  geom_point(shape  = 15)+labs(subtitle ="Baseline: word length,subtitle frequency and semantic neighborhood density for both words",title = "SimLex999")+
+  scale_y_continuous(breaks = pretty(R2.dat$R2,n=10))+
+  theme_bw()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
