@@ -131,8 +131,7 @@ return(sw_ws353)
 sw_ws353.sim <- get_sw353("sim353_sim")
 sw_ws353.rel <- get_sw353("sim353_rel")
 
-#write.csv(sw_ws353.sim, "sim353_sim.csv")
-#write.csv(sw_ws353.sim, "sim353_rel.csv")
+
 
 get_R2 <- function(call){
     sw_ws353 <- get_sw353(call)
